@@ -3,28 +3,25 @@ import torch
 from wake_control_gym.core import ObservationType, Simulator
 
 
-class FarmYawAngles:
-    obs_type: ObservationType = 'global'
-    dim: int
+class TurbineYawAngle:
+    obs_type: ObservationType = 'local'
+    dim: int = 1
     low: torch.Tensor
     high: torch.Tensor
 
     metadata: dict[str, Any] = {}
 
     def __init__(self, simulator: Simulator) -> None:
-        self.dim = simulator.num_turbines
-        self.low = torch.full(
-            (simulator.num_turbines,),
-            simulator.valid_yaw_range[0],
+        self.low = torch.tensor(
+            [simulator.valid_yaw_range[0]],
             device=simulator.device,
             dtype=simulator.dtype,
         )
-        self.high = torch.full(
-            (simulator.num_turbines,),
-            simulator.valid_yaw_range[1],
+        self.high = torch.tensor(
+            [simulator.valid_yaw_range[1]],
             device=simulator.device,
             dtype=simulator.dtype,
         )
 
     def __call__(self, simulator: Simulator, *args, **kwargs) -> torch.Tensor:
-        return simulator.yaw_angles()
+        return simulator.yaw_angles().view(-1, self.dim)

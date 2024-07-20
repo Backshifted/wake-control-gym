@@ -6,11 +6,17 @@ import torch
 
 
 ObservationType = Literal['global', 'local']
+MeasurementPoint = tuple[float, float] | tuple[float, float, float]
 
 
 class TurbineLayout(NamedTuple):
     x: list[float]
     y: list[float]
+
+
+class Action(NamedTuple):
+    yaw_angles: torch.Tensor | None = None
+    pitch_angles: torch.Tensor | None = None
 
 
 class Simulator(Protocol):
@@ -19,7 +25,6 @@ class Simulator(Protocol):
     layout: TurbineLayout
 
     # Metadata
-    can_render_human: bool
     valid_yaw_range: tuple[float, float]
     turbine_power_range: tuple[float, float]
 
@@ -27,25 +32,37 @@ class Simulator(Protocol):
     device: str | torch.device | int
     dtype: torch.dtype
 
-    def reset(self, seed: int, **kwargs) -> None:
+    def reset(self, seed: int, options: dict[str, Any] | None = None) -> None:
         """Reset the simulator with a new seed."""
         ...
 
-    def step(self, yaw_angles: torch.Tensor):
+    def step(self, action: Action) -> None:
         """
-        Perform a simulation step with the given yaw angles.
+        Perform a simulation step with the given yaw angles and/or pitch angles
+        in the action.
+        """
+        ...
+
+    def add_measurement_points(self, measurement_points: list[MeasurementPoint]) -> list[int]:
+        """Add measurement points for the flow field. If only x and y are
+        given, the hub height is used for the z-value.
 
         Parameters
         ----------
-        yaw_angles : torch.Tensor
-            A tensor of shape (num_turbines,) or with additional batch
-            dimensions (..., num_turbines), representing the yaw angles
-            for each turbine in the layout.
+        measurement_points : list[MeasurementPoint]
+            The list of measurement points to add.
+
+        Returns
+        -------
+        list[int]
+            A list of indices, where each index represents the position
+            of the original measurment point to the simulator's
+            set of measurement points.
         """
         ...
 
     def farm_turbulence_intensity(self) -> torch.Tensor:
-        """Evaluate the farm average turbulence intensity.
+        """Evaluate the farm turbulence intensity.
 
         Returns
         -------
@@ -55,7 +72,7 @@ class Simulator(Protocol):
         ...
 
     def turbine_power(self) -> torch.Tensor:
-        """Evaluate the instantaneous power at each turbine.
+        """Evaluate the power generated at each turbine in MWh.
 
         Returns
         -------
@@ -74,8 +91,8 @@ class Simulator(Protocol):
         """
         ...
 
-    def wind_speed(self, locations: tuple[list[float], list[float]]) -> torch.Tensor:
-        """Get the wind speed measurement at the given locations.
+    def wind_speed(self) -> torch.Tensor:
+        """Get the wind speed at the simulator's measurement points.
 
         Returns
         -------
@@ -84,8 +101,8 @@ class Simulator(Protocol):
         """
         ...
 
-    def wind_direction(self, locations: tuple[list[float], list[float]]) -> torch.Tensor:
-        """Get the wind direction measurement in degrees at the given locations.
+    def wind_direction(self) -> torch.Tensor:
+        """Get the wind direction at the simulator's measurement points.
 
         Returns
         -------
@@ -109,10 +126,6 @@ class Simulator(Protocol):
         """
         ...
 
-    def render_human(self) -> None:
-        """Displays the environment, using some external method."""
-        ...
-
 
 class RewardFunc(Protocol):
     reward_range: torch.Tensor
@@ -129,6 +142,8 @@ class RewardFunc(Protocol):
 
 
 class Observation(Protocol):
+    # Observation types: Local, global, turbine, met mast ?
+    # Local / global determine how
     obs_type: ObservationType
     dim: int
     low: torch.Tensor
@@ -178,7 +193,7 @@ class ActionRepresentation(Protocol):
         """
         ...
 
-    def __call__(self, action: torch.Tensor, simulator: Simulator) -> torch.Tensor:
+    def __call__(self, action: torch.Tensor, simulator: Simulator) -> Action:
         """Convert an action to the a set of yaw-misalignment angles.
 
         Parameters
@@ -190,9 +205,9 @@ class ActionRepresentation(Protocol):
 
         Returns
         -------
-        torch.Tensor
-            A tensor of shape (num_turbines,) representing the
-            yaw-misalignment angles.
+        Action
+            Tensors of shape (num_turbines,) representing the
+            yaw-misalignment angles and/or pitch angles.
         """
         ...
 
@@ -201,6 +216,7 @@ class SimulatorInitFunc(Protocol):
     def __call__(
         self,
         layout: TurbineLayout,
+        seed: int,
         device: str | torch.device | int,
         dtype: torch.dtype,
     ) -> Simulator:
@@ -210,6 +226,8 @@ class SimulatorInitFunc(Protocol):
         ----------
         layout : TurbineLayout
             The layout of the turbines to be used in the simulation.
+        seed : int
+            The seed for the pseudo-random number generator of the simulator.
         """
         ...
 

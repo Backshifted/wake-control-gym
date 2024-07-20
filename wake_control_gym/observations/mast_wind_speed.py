@@ -1,9 +1,12 @@
 from typing import Any
 import torch
-from wake_control_gym.core import ObservationType, Simulator
+from wake_control_gym.core import MeasurementPoint, ObservationType, Simulator
+
+MIN_WINDSPEED = 0
+MAX_WINDSPEED = 20
 
 
-class FarmYawAngles:
+class MastWindSpeeds:
     obs_type: ObservationType = 'global'
     dim: int
     low: torch.Tensor
@@ -11,20 +14,23 @@ class FarmYawAngles:
 
     metadata: dict[str, Any] = {}
 
-    def __init__(self, simulator: Simulator) -> None:
-        self.dim = simulator.num_turbines
+    measurement_point_indices: list[int]
+
+    def __init__(self, simulator: Simulator, measurement_points: list[MeasurementPoint]) -> None:
+        self.dim = len(measurement_points)
         self.low = torch.full(
             (simulator.num_turbines,),
-            simulator.valid_yaw_range[0],
+            MIN_WINDSPEED,
             device=simulator.device,
             dtype=simulator.dtype,
         )
         self.high = torch.full(
             (simulator.num_turbines,),
-            simulator.valid_yaw_range[1],
+            MAX_WINDSPEED,
             device=simulator.device,
             dtype=simulator.dtype,
         )
+        self.measurement_point_indices = simulator.add_measurement_points(measurement_points)
 
     def __call__(self, simulator: Simulator, *args, **kwargs) -> torch.Tensor:
-        return simulator.yaw_angles()
+        return simulator.wind_speed()[self.measurement_point_indices]

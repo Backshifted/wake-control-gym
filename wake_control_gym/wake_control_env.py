@@ -1,5 +1,6 @@
-from typing import Any
+from typing import Any, Sequence
 
+import cv2
 import gymnasium as gym
 import numpy as np
 import torch
@@ -15,7 +16,13 @@ from wake_control_gym.core import (
     SimulatorInitFunc,
     TurbineLayout,
 )
-from wake_control_gym.action_representations import WindBasedActions
+from wake_control_gym.observations import (
+    FarmWindDirections,
+    FarmWindSpeeds,
+    FarmYawAngles,
+    TurbulenceIntensity,
+)
+from wake_control_gym.action_representations import YawMisalignmentAction
 from wake_control_gym.reward_functions import FarmPowerReward
 from wake_control_gym.torch_wind_sim import TorchWindSim
 
@@ -27,12 +34,16 @@ def _create_observation_space(
     seed: int | None = None,
 ) -> tuple[gym.spaces.Box, torch.Tensor, torch.Tensor, list[Observation], list[Observation]]:
     """Reads lows and highs from the observations and constructs an Box space."""
-
-    global_observations = [obs(simulator) for obs in observations if obs.obs_type == 'global']
-    local_observations = [obs(simulator) for obs in observations if obs.obs_type == 'local']
+    observations = [obs(simulator) for obs in observations]
+    global_observations = [obs for obs in observations if obs.obs_type == 'global']
+    local_observations = [obs for obs in observations if obs.obs_type == 'local']
 
     assert (
-        is_multi_agent or len(local_observations) == 0
+        global_observations or local_observations
+    ), 'Observations required, single-state mdp not supported.'
+
+    assert (
+        is_multi_agent or not local_observations
     ), 'Cannot have local observations in single-agent environment.'
 
     index = 0
@@ -44,18 +55,24 @@ def _create_observation_space(
         obs.metadata['index'] = index
         index += obs.dim
 
-    low = torch.cat([obs.low for obs in global_observations])
-    high = torch.cat([obs.high for obs in global_observations])
+    low = torch.tensor([], device=simulator.device, dtype=simulator.dtype)
+    high = torch.tensor([], device=simulator.device, dtype=simulator.dtype)
+
+    if global_observations:
+        global_lows = [obs.low for obs in global_observations]
+        low = torch.cat([low, *global_lows])
+        global_high = [obs.high for obs in global_observations]
+        high = torch.cat([high, *global_high])
 
     if is_multi_agent:
         low = low.repeat(simulator.num_turbines, 1)
         high = high.repeat(simulator.num_turbines, 1)
 
-    if len(local_observations) > 0:
-        local_low = torch.cat([obs.low for obs in local_observations], dim=1)
-        local_high = torch.cat([obs.high for obs in local_observations], dim=1)
-        low = torch.cat([low, local_low], dim=1)
-        high = torch.cat([high, local_high], dim=1)
+    if local_observations:
+        local_low = [obs.low.repeat(simulator.num_turbines, 1) for obs in local_observations]
+        local_high = [obs.high.repeat(simulator.num_turbines, 1) for obs in local_observations]
+        low = torch.cat([low, *local_low], dim=1)
+        high = torch.cat([high, *local_high], dim=1)
 
     observation_space = gym.spaces.Box(low.cpu().numpy(), high.cpu().numpy(), seed=seed)
     return observation_space, low, high, global_observations, local_observations
@@ -68,20 +85,47 @@ def _create_observation(
     is_multi_agent: bool,
 ) -> torch.Tensor:
     """Iterates over the observation functions and concatenates the result."""
-    obs = torch.cat([obs(simulator) for obs in global_observations])
+    observation = torch.tensor([], device=simulator.device, dtype=simulator.dtype)
+
+    if not global_observations and not local_observations:
+        observation = torch.zeros((1,), device=simulator.device, dtype=simulator.dtype)
+
+    if global_observations:
+        global_obs = [obs(simulator) for obs in global_observations]
+        observation = torch.cat([observation, *global_obs])
 
     if is_multi_agent:
-        obs = obs.repeat(simulator.num_turbines, 1)
-    if len(local_observations) == 0:
-        return obs
+        observation = observation.view(1, -1).repeat(simulator.num_turbines, 1)
 
-    local_obs = torch.cat([obs(simulator) for obs in local_observations], dim=1)
-    return torch.cat([obs, local_obs], dim=1)
+    if local_observations:
+        local_obs = [obs(simulator) for obs in local_observations]
+        observation = torch.cat([observation, *local_obs], dim=1)
+
+    return observation
 
 
-# Must call reset before stepping.
+# def _create_observation(
+#     simulator: Simulator,
+#     global_observations: list[Observation],
+#     local_observations: list[Observation],
+#     is_multi_agent: bool,
+# ) -> torch.Tensor:
+#     """Iterates over the observation functions and concatenates the result."""
+#     obs = torch.cat([obs(simulator) for obs in global_observations])
+
+#     if is_multi_agent:
+#         obs = obs.repeat(simulator.num_turbines, 1)
+#     if len(local_observations) == 0:
+#         return obs
+
+#     local_obs = torch.cat([obs(simulator) for obs in local_observations], dim=1)
+#     return torch.cat([obs, local_obs], dim=1)
+
+
 class WakeControlEnv(gym.Env[gym.spaces.Box, gym.spaces.Box]):
-    metadata = {'render_modes': ['rgb_array']}
+    """Must call reset before stepping."""
+
+    metadata = {'render_modes': ['rgb_array', 'human']}
 
     # Internals
     simulator: Simulator
@@ -89,6 +133,11 @@ class WakeControlEnv(gym.Env[gym.spaces.Box, gym.spaces.Box]):
     global_observations: list[Observation]
     observation_low: torch.Tensor
     observation_high: torch.Tensor
+    cv2_window_name: str = 'Wake Control Env Viewer'
+    _num_turbines: int
+    _layout: TurbineLayout
+    _seed: int
+    _torch_random: torch.Generator
 
     # Options
     action_representation: ActionRepresentation
@@ -96,21 +145,21 @@ class WakeControlEnv(gym.Env[gym.spaces.Box, gym.spaces.Box]):
     is_multi_agent: bool
     enable_info: bool
 
-    # Misc
-    _num_turbines: int
-    _layout: TurbineLayout
-    _seed: int
-    _torch_random: torch._C.Generator
-
     def __init__(
         self,
-        layout: TurbineLayout,
-        observations: list[NewObservationFunc],
+        layout: TurbineLayout | tuple[list[float], list[float]],
+        observations: Sequence[NewObservationFunc] = (
+            TurbulenceIntensity,
+            FarmWindSpeeds,
+            FarmWindDirections,
+            FarmYawAngles,
+        ),
         init_simulator: SimulatorInitFunc = TorchWindSim,
-        new_action_representation: NewActionRepresentationFunc = WindBasedActions,
+        new_action_representation: NewActionRepresentationFunc = YawMisalignmentAction,
         new_reward_func: NewRewardFuncFunc = FarmPowerReward,
         is_multi_agent: bool = False,
         enable_info: bool = True,
+        seed: int | None = None,
         device: str | torch.device | int = 'cpu',
         dtype: torch.dtype = torch.float32,
     ) -> None:
@@ -119,8 +168,16 @@ class WakeControlEnv(gym.Env[gym.spaces.Box, gym.spaces.Box]):
         self.is_multi_agent = is_multi_agent
         self.enable_info = enable_info
 
-        self._num_turbines = len(layout.x)
-        self.simulator = init_simulator(TurbineLayout, device=device, dtype=dtype)
+        if seed is None:
+            self._seed = torch.random.seed()
+        else:
+            self._seed = seed
+        self._torch_random = torch.random.manual_seed(self._seed)
+
+        if not isinstance(layout, TurbineLayout):
+            self._layout = TurbineLayout(*layout)
+        self._num_turbines = len(self.layout.x)
+        self.simulator = init_simulator(self.layout, seed=seed, device=device, dtype=dtype)
         (
             self.observation_space,
             self.observation_low,
@@ -137,13 +194,21 @@ class WakeControlEnv(gym.Env[gym.spaces.Box, gym.spaces.Box]):
     ) -> tuple[torch.Tensor, torch.Tensor, bool, bool, dict[str, Any]]:
         info = {}
 
-        self.simulator.step(action)
-        observation = self._create_observation()
+        # Convert the action passed
+        simulator_action = self.action_representation(action, self.simulator)
+        self.simulator.step(simulator_action)
+        observation = _create_observation(
+            self.simulator,
+            self.global_observations,
+            self.local_observations,
+            self.is_multi_agent,
+        )
         reward = self.reward_func(self.simulator)
         info = self._create_simulator_info()
 
-        if self.render_mode == 'human' and self.simulator.can_render_human:
-            self.simulator.render_human()
+        if self.render_mode == 'human':
+            frame = self.simulator.render()
+            cv2.imshow(self.cv2_window_name, cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
 
         return observation, reward, False, False, info
 
@@ -156,32 +221,46 @@ class WakeControlEnv(gym.Env[gym.spaces.Box, gym.spaces.Box]):
             self._seed = seed
 
         self._torch_random = torch.random.manual_seed(self._seed)
-        self.simulator.reset(seed=self._seed, **options)
+        self._close_render_window()
+        self.simulator.reset(seed=self._seed, options=options)
         info = self._create_simulator_info()
         info['seed'] = self._seed
         observation = _create_observation(
-            self.simulator, self.global_observations, self.local_observations
+            self.simulator,
+            self.global_observations,
+            self.local_observations,
+            self.is_multi_agent,
         )
 
         return observation, info
 
-    def render(self) -> np.ndarray:
+    def close(self):
+        self._close_render_window()
+
+    def render(self) -> np.ndarray | None:
         """Render the environment to an rgb frame.
 
         Returns
         -------
-        np.ndarray
+        np.ndarray | None
             A numpy array of shape (height, width, 3) containing the frame data.
         """
+        if self.render_mode == 'human':
+            return None
+
         return self.simulator.render()
 
     def _create_simulator_info(self) -> dict[str, Any]:
         if self.enable_info:
             return {
-                'turbine_power': self.simulator.turbine_power(),
+                # 'turbine_power': self.simulator.turbine_power(),
             }
 
         return {}
+
+    def _close_render_window(self):
+        if cv2.getWindowProperty(self.cv2_window_name, cv2.WND_PROP_VISIBLE) > 0:
+            cv2.destroyWindow(self.cv2_window_name)
 
     # def _create_observation(self) -> torch.Tensor:
     #     return torch.from_numpy(self.observation_space.sample()).to(
@@ -203,3 +282,7 @@ class WakeControlEnv(gym.Env[gym.spaces.Box, gym.spaces.Box]):
     @property
     def num_turbines(self) -> int:
         return self._num_turbines
+
+    @property
+    def seed(self) -> int:
+        return self._seed
