@@ -12,15 +12,15 @@ class FlorisCutPlane:
     fig: Figure
     canvas: FigureCanvasAgg
 
-    cmap: str = 'Purples_r'
+    cmap: str
     resolution: tuple[int, int]
 
-    def __init__(self, resolution: tuple[int, int]) -> None:
+    def __init__(self, resolution: tuple[int, int], cmap: str = "Purples_r") -> None:
         plt.ioff()
         self.fig, self.ax = plt.subplots()
-        self.fig.tight_layout(pad=0)
         self.canvas = FigureCanvasAgg(self.fig)
         self.resolution = resolution
+        self.cmap = cmap
 
     def as_rgb(self, fmodel: floris.FlorisModel) -> np.ndarray:
         """TODO: Does not work yet
@@ -56,10 +56,13 @@ class FlorisCutPlane:
         TypeError: only length-1 arrays can be converted to Python scalars
         """
         horizontal_plane = fmodel.calculate_horizontal_plane(
-            fmodel.core.farm.hub_heights[0],
+            fmodel.core.farm.hub_heights.flatten()[0],
             *self.resolution,
         )
         self.ax.clear()
-        floris.visualize_cut_plane(horizontal_plane, ax=self.ax, cmap=self.camp)
+        floris.visualize_cut_plane(horizontal_plane, ax=self.ax, cmap=self.cmap)
         floris.layout_visualization.plot_turbine_rotors(fmodel, ax=self.ax)
+        self.ax.axis('off')
+        self.fig.tight_layout(pad=0)
+        self.canvas.draw()
         return np.asarray(self.canvas.buffer_rgba(), dtype=np.uint8)[:, :, :3]

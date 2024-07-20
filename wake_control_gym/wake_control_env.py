@@ -209,6 +209,11 @@ class WakeControlEnv(gym.Env[gym.spaces.Box, gym.spaces.Box]):
         if self.render_mode == 'human':
             frame = self.simulator.render()
             cv2.imshow(self.cv2_window_name, cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+            key = cv2.waitKey(1)
+
+            if key == 27:
+                self.render_mode = 'rgb_array'
+                self._close_render_window()
 
         return observation, reward, False, False, info
 

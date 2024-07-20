@@ -124,6 +124,7 @@ class FlorisAdapter:
             max_yaws = self.fmodel.core.farm.yaw_angles + self.max_delta_yaw
             yaw_angles = np.clip(yaw_angles, min_yaws, max_yaws)
             yaw_angles = np.clip(yaw_angles, *self.valid_yaw_range)
+            # TODO / Profiling: fmodel.set is verrrrry expensive.
             self.fmodel.set(yaw_angles=yaw_angles)
         if action.pitch_angles is not None:
             raise NotImplementedError('Pitch angle control-action not implemented')
@@ -144,8 +145,9 @@ class FlorisAdapter:
             return
 
         # Sample all the wind measurements
+        # TODO / Profiling: This function is expensive
         self.fmodel.sample_flow_at_points(*self.measurement_point_lists)
-        # [.., 0, 0] to remove turbine grid points (see sample_flow_at_points)
+        # [..., 0, 0] to remove turbine grid points (see sample_flow_at_points)
         u = self.fmodel.core.flow_field.u_sorted[0, :, 0, 0]
         v = self.fmodel.core.flow_field.v_sorted[0, :, 0, 0]
         ti = self.fmodel.turbulence_intensities.mean()
