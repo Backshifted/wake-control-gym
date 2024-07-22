@@ -1,9 +1,9 @@
 import torch
 
-from wake_control_gym.core import TurbineLayout
+from wake_control_gym.core import Simulator, TurbineLayout
 
 
-class TorchWindSim:
+class TorchWindSim(Simulator):
     def __init__(
         self,
         layout: TurbineLayout,

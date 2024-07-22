@@ -5,7 +5,7 @@ import floris.layout_visualization
 import numpy as np
 import torch
 
-from wake_control_gym.core import Action, MeasurementPoint, TurbineLayout
+from wake_control_gym.core import Action, MeasurementPoint, Simulator, TurbineLayout
 from wake_control_gym.adapters.floris.visualisation import FlorisCutPlane
 
 
@@ -22,7 +22,7 @@ def compute_turbine_power_range(
     return 0, power_table.max()
 
 
-class FlorisAdapter:
+class FlorisAdapter(Simulator):
     # Floris
     fmodel: floris.FlorisModel
     floris_config: str | dict[str, Any]
@@ -36,7 +36,7 @@ class FlorisAdapter:
     valid_yaw_range: tuple[float, float]
     time_delta_seconds: int
     max_angular_velocity: float  # Degrees per second
-    visualisation_resolution: tuple[int, int]
+    vis_kwargs: dict
 
     # Internals
     num_turbines: int
@@ -47,7 +47,6 @@ class FlorisAdapter:
     turbine_power_range: tuple[float, float]
     turbine_power_factor: float
     visualisation: FlorisCutPlane | None = None
-
     # Constants / metadata
     min_windspeed: float = 0
     max_windspeed: float = 20
@@ -67,7 +66,7 @@ class FlorisAdapter:
         valid_yaw_range: tuple[float, float] = (-30, 30),
         time_delta_seconds: int = 1,
         max_angular_velocity: float = 1,
-        visualisation_resolution: tuple[int, int] = (200, 100),
+        vis_kwargs: dict | None = None,
     ) -> None:
         self.floris_config = floris_config
         self.layout = layout
@@ -77,7 +76,7 @@ class FlorisAdapter:
         self.time_delta_seconds = time_delta_seconds
         self.max_angular_velocity = max_angular_velocity
         self.max_delta_yaw = max_angular_velocity * time_delta_seconds
-        self.visualisation_resolution = visualisation_resolution
+        self.vis_kwargs = {} if vis_kwargs is None else vis_kwargs
 
         self.num_turbines = len(layout.x)
         self.measurement_point_lists = ([], [], [])
@@ -94,14 +93,12 @@ class FlorisAdapter:
         if options is None:
             options = {}
 
+        self.visualisation = None
         self.fmodel = floris.FlorisModel(self.floris_config)
         self.fmodel.set(layout_x=self.layout.x, layout_y=self.layout.y, **options)
         self._run_measurements()
 
-    def step(
-        self,
-        action: Action,
-    ) -> None:
+    def step(self, action: Action) -> None:
         """
         Perform a simulation step with the given yaw angles. Clipping the
         yaw angles to the according to the maximum angular velocity
@@ -157,7 +154,7 @@ class FlorisAdapter:
         # Should only be one wind direction
         self._input_wind_direction = self.fmodel.core.flow_field.wind_directions[0]
 
-    def add_measurement_points(self, measurement_points: list[MeasurementPoint]) -> list[int]:
+    def register_measurement_points(self, measurement_points: list[MeasurementPoint]) -> list[int]:
         """Add measurement points for the flow field. If only x and y are
         given, the hub height is used for the z-value.
 
@@ -258,6 +255,6 @@ class FlorisAdapter:
             A numpy array of shape (height, width, 3) containing the frame data.
         """
         if self.visualisation is None:
-            self.visualisation = FlorisCutPlane(self.visualisation_resolution)
+            self.visualisation = FlorisCutPlane(self.fmodel, **self.vis_kwargs)
 
-        return self.visualisation.as_rgb(self.fmodel)
+        return self.visualisation.render_rgb(self.fmodel)

@@ -28,7 +28,8 @@ def main():
         TurbineWindSpeed,
         TurbineYawAngle,
     ]
-    init_floris = partial(FlorisAdapter, floris_config='./floris-jensen.yaml')
+    init_floris = partial(FlorisAdapter, floris_config='./emgauss.yaml')
+    # init_floris = partial(FlorisAdapter, floris_config='./floris-jensen.yaml')
 
     env = WakeControlEnv(
         layout=layout,
@@ -37,13 +38,24 @@ def main():
         is_multi_agent=True,
     )
 
-    # env.render_mode = 'human'
-    yaws = torch.arange(30).view(30, 1).repeat(1, 3)
+    env.render_mode = 'human'
+    n = 200
+    yaws = torch.arange(n).view(n, 1).repeat(1, 3)
     obs, info = env.reset()
 
+    from time import perf_counter
+
+    start = perf_counter()
+
     for yaw_config in yaws:
+        # print(f'yaws: {yaw_config}')
         obs, reward, _, _, info = env.step(yaw_config)
-        print(obs, reward)
+        # print(obs, reward)
+
+    end = perf_counter()
+    print(end - start)
+    print((end - start) / n)
+    print(n / (end - start))
 
     env.close()
 

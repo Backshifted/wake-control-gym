@@ -1,9 +1,9 @@
 import torch
 
-from wake_control_gym.core import Simulator
+from wake_control_gym.core import RewardFunction, Simulator
 
 
-class TurbinePowerReward:
+class TurbinePowerReward(RewardFunction):
     reward_range: tuple[torch.Tensor, torch.Tensor]
 
     def __init__(self, simulator: Simulator) -> None:

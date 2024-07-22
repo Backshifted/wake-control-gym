@@ -1,18 +1,13 @@
-from typing import Any
 import torch
-from wake_control_gym.core import ObservationType, Simulator
+from wake_control_gym.core import Observation, ObservationType, Simulator
 
 MIN_TURBULENCE = 0
 MAX_TURBULENCE = 2
 
 
-class TurbulenceIntensity:
+class TurbulenceIntensity(Observation):
     obs_type: ObservationType = 'global'
     dim: int = 1
-    low: torch.Tensor
-    high: torch.Tensor
-
-    metadata: dict[str, Any] = {}
 
     def __init__(self, simulator: Simulator) -> None:
         self.low = torch.tensor([MIN_TURBULENCE], device=simulator.device, dtype=simulator.dtype)

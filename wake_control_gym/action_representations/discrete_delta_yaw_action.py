@@ -1,12 +1,12 @@
 import gymnasium as gym
 import torch
 
-from wake_control_gym.core import Action, Simulator
+from wake_control_gym.core import Action, ActionRepresentation, Simulator
 
 DEFAULT_STEP_SIZES = [-1, 0, 1]
 
 
-class DiscreteDeltaYawAction:
+class DiscreteDeltaYawAction(ActionRepresentation):
     """Convert discrete delta yaws into [min yaw, max yaw]^n"""
 
     space: gym.spaces.MultiDiscrete

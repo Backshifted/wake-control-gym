@@ -11,7 +11,7 @@ from wake_control_gym.core import (
     NewObservationFunc,
     NewRewardFuncFunc,
     Observation,
-    RewardFunc,
+    RewardFunction,
     Simulator,
     SimulatorInitFunc,
     TurbineLayout,
@@ -49,10 +49,10 @@ def _create_observation_space(
     index = 0
 
     for obs in global_observations:
-        obs.metadata['index'] = index
+        obs.index = index
         index += obs.dim
     for obs in local_observations:
-        obs.metadata['index'] = index
+        obs.index = index
         index += obs.dim
 
     low = torch.tensor([], device=simulator.device, dtype=simulator.dtype)
@@ -141,7 +141,7 @@ class WakeControlEnv(gym.Env[gym.spaces.Box, gym.spaces.Box]):
 
     # Options
     action_representation: ActionRepresentation
-    reward_func: RewardFunc
+    reward_func: RewardFunction
     is_multi_agent: bool
     enable_info: bool
 

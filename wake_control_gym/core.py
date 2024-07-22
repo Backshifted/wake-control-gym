@@ -1,3 +1,4 @@
+from abc import ABC, abstractmethod
 from typing import Any, Literal, NamedTuple, Protocol
 
 import gymnasium as gym
@@ -19,7 +20,7 @@ class Action(NamedTuple):
     pitch_angles: torch.Tensor | None = None
 
 
-class Simulator(Protocol):
+class Simulator(ABC):
     # Misc
     num_turbines: int
     layout: TurbineLayout
@@ -32,10 +33,12 @@ class Simulator(Protocol):
     device: str | torch.device | int
     dtype: torch.dtype
 
+    @abstractmethod
     def reset(self, seed: int, options: dict[str, Any] | None = None) -> None:
         """Reset the simulator with a new seed."""
         ...
 
+    @abstractmethod
     def step(self, action: Action) -> None:
         """
         Perform a simulation step with the given yaw angles and/or pitch angles
@@ -43,7 +46,8 @@ class Simulator(Protocol):
         """
         ...
 
-    def add_measurement_points(self, measurement_points: list[MeasurementPoint]) -> list[int]:
+    @abstractmethod
+    def register_measurement_points(self, measurement_points: list[MeasurementPoint]) -> list[Any]:
         """Add measurement points for the flow field. If only x and y are
         given, the hub height is used for the z-value.
 
@@ -54,13 +58,14 @@ class Simulator(Protocol):
 
         Returns
         -------
-        list[int]
+        list[Any]
             A list of indices, where each index represents the position
             of the original measurment point to the simulator's
             set of measurement points.
         """
         ...
 
+    @abstractmethod
     def farm_turbulence_intensity(self) -> torch.Tensor:
         """Evaluate the farm turbulence intensity.
 
@@ -71,6 +76,7 @@ class Simulator(Protocol):
         """
         ...
 
+    @abstractmethod
     def turbine_power(self) -> torch.Tensor:
         """Evaluate the power generated at each turbine in MWh.
 
@@ -81,6 +87,7 @@ class Simulator(Protocol):
         """
         ...
 
+    @abstractmethod
     def yaw_angles(self) -> torch.Tensor:
         """Get the turbine yaw angles.
 
@@ -91,6 +98,7 @@ class Simulator(Protocol):
         """
         ...
 
+    @abstractmethod
     def wind_speed(self) -> torch.Tensor:
         """Get the wind speed at the simulator's measurement points.
 
@@ -101,6 +109,7 @@ class Simulator(Protocol):
         """
         ...
 
+    @abstractmethod
     def wind_direction(self) -> torch.Tensor:
         """Get the wind direction at the simulator's measurement points.
 
@@ -111,11 +120,13 @@ class Simulator(Protocol):
         """
         ...
 
+    @abstractmethod
     def close(self) -> None:
         """Dispose of the simulation environment,
         perform any deconstruction here."""
         ...
 
+    @abstractmethod
     def render(self) -> np.ndarray:
         """Render the environment to an rgb frame.
 
@@ -127,9 +138,10 @@ class Simulator(Protocol):
         ...
 
 
-class RewardFunc(Protocol):
+class RewardFunction(ABC):
     reward_range: torch.Tensor
 
+    @abstractmethod
     def __call__(self, simulator: Simulator) -> torch.Tensor:
         """Compute the reward for the current state of the environment.
 
@@ -141,28 +153,15 @@ class RewardFunc(Protocol):
         ...
 
 
-class Observation(Protocol):
-    # Observation types: Local, global, turbine, met mast ?
-    # Local / global determine how
+class Observation(ABC):
     obs_type: ObservationType
     dim: int
     low: torch.Tensor
     high: torch.Tensor
-
     # Set externally by the gym environment.
-    metadata: dict[str, Any] = {'index': 0}
+    index: int | None = None
 
-    def __init__(self, simulator: Simulator) -> None:
-        """Setup the `dim`, `low`, and `high` variables using the simulator.
-        The simulator reference should not be stored.
-
-        Parameters
-        ----------
-        simulator : Simulator
-            The simulator for the environment.
-        """
-        ...
-
+    @abstractmethod
     def __call__(self, simulator: Simulator) -> torch.Tensor:
         """Generate an observation from the simulator.
 
@@ -179,20 +178,10 @@ class Observation(Protocol):
         ...
 
 
-class ActionRepresentation(Protocol):
+class ActionRepresentation(ABC):
     space: gym.Space
 
-    def __init__(self, simulator: Simulator) -> None:
-        """Setup the `space` variable using the simulator.
-        The simulator reference should not be stored.
-
-        Parameters
-        ----------
-        simulator : Simulator
-            The simulator for the environment.
-        """
-        ...
-
+    @abstractmethod
     def __call__(self, action: torch.Tensor, simulator: Simulator) -> Action:
         """Convert an action to the a set of yaw-misalignment angles.
 
@@ -235,6 +224,6 @@ class SimulatorInitFunc(Protocol):
 class NewObservationFunc(Protocol):
     def __call__(self, simulator: Simulator) -> Observation: ...
 class NewRewardFuncFunc(Protocol):
-    def __call__(self, simulator: Simulator) -> RewardFunc: ...
+    def __call__(self, simulator: Simulator) -> RewardFunction: ...
 class NewActionRepresentationFunc(Protocol):
     def __call__(self, simulator: Simulator) -> ActionRepresentation: ...

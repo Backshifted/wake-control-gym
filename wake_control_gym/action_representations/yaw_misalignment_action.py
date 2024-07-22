@@ -2,10 +2,10 @@ import gymnasium as gym
 import numpy as np
 import torch
 
-from wake_control_gym.core import Action, Simulator
+from wake_control_gym.core import Action, ActionRepresentation, Simulator
 
 
-class YawMisalignmentAction:
+class YawMisalignmentAction(ActionRepresentation):
     """Convert [-1, 1]^n to [min yaw, max yaw]^n."""
 
     space: gym.spaces.Box
