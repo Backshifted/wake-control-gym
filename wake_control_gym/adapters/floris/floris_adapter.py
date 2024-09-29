@@ -216,7 +216,7 @@ class FlorisAdapter(Simulator):
             A tensor of shape (num_turbines,)
         """
         return torch.tensor(
-            self.fmodel.core.farm.yaw_angles,
+            self.fmodel.core.farm.yaw_angles.flatten(),
             device=self.device,
             dtype=self.dtype,
         )
